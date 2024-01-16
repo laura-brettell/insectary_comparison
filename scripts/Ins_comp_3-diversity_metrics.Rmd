@@ -1,0 +1,844 @@
+---
+title: "Ins_comp_3-diversity_metrics"
+author: "laura"
+date: "2024-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The project
+
+Does rearing in a different insectary affect the mosquito microbiome?
+
+# The setup
+
+one cohort of Ae aegypti eggs were split into 3 and reared in standard conditions to see how their microbiomes varied between insectaries at diff life stages.
+
+
+https://bioconductor.org/packages/release/bioc/vignettes/MicrobiotaProcess/inst/doc//MicrobiotaProcess.html
+
+
+
+# Install packages
+
+```{r}
+# phyloseq itself
+#if(!requireNamespace("BiocManager")){
+#  install.packages("BiocManager")
+#   }
+#BiocManager::install("phyloseq")
+
+# if (!requireNamespace("BiocManager", quietly=TRUE))
+ #   install.packages("BiocManager")
+## BiocManager::install("BiocUpgrade") ## you may need this
+#BiocManager::install("MicrobiotaProcess")
+ 
+
+#install.packages("gghalves") # required for `mp_plot_alpha()`
+#install.packages("ggh4x") # required for `mp_plot_alpha()`
+
+
+library(phyloseq)
+library(ggplot2)
+#library(tidyverse)
+library(dplyr) # for select command
+library(MicrobiotaProcess)
+library(gghalves)
+library(ggh4x)
+library(ggpubr)
+library(dunn.test)
+library(scales) # for the ordination plotting
+
+```
+
+# import data
+
+```{r}
+ps = readRDS("physeq_obj_3974") # currently phyloseq obj
+
+```
+
+
+
+# Firstly, using the microbiotaprocess package
+```{r}
+# convert phyloseq object to mpse to use with MicrobiotaProcess package
+mpse <- ps %>% as.MPSE() 
+
+mpse
+
+```
+
+
+
+## alpha diversity
+
+First do the calculations
+
+```{r}
+mpse %<>% 
+    mp_cal_alpha(.abundance=RareAbundance)
+mpse
+
+```
+
+then plot
+
+```{r warning=FALSE}
+
+f1 <- mpse %>% 
+      mp_plot_alpha(
+        .group=Sample_Type2, 
+        .alpha=c(Shannon)
+      ) +
+      scale_fill_manual(values=c("#56187D", "#AC0123", "#006347", "#97D0A7", "#EF9F26", "#7AA8D7"), guide="none") +
+      scale_color_manual(values=c("#56187D", "#AC0123", "#006347", "#97D0A7", "#EF9F26", "#7AA8D7"), guide="none")
+
+f1
+
+
+```
+
+try extracting and plotting differently, so I can facet
+
+```{r}
+temp <- mp_extract_sample(mpse)
+
+```
+
+
+
+```{r}
+colours <- c(
+  "AdultFemale" = "#56187D", 
+  "FishFood" = "#AC0123", 
+  "Larva" = "#006347", 
+  "LarvalWater" = "#97D0A7", 
+  "Sugar" = "#EF9F26", 
+  "Sugar2" = "#E6CD69", 
+  "Water" = "#7AA8D7"
+)
+
+
+colours2 <- c(
+  "Accelerator" = "#00A087FF",
+  "CTID" = "#3C5488FF",
+  "MaryKingsley" = "#9C58A1"
+)
+
+```
+
+
+### alpha div plot option 1
+
+
+```{r}
+p1 <- temp %>%
+  ggplot+
+  geom_boxplot(outlier.shape = NA, pch = NA) +
+  aes(x=factor(Sample_Type2, level = c("AdultFemale", "Larva", "LarvalWater", "Water", "Sugar", "FishFood")), y=Shannon, fill=Sample_Type2) +
+  geom_point(position=position_jitterdodge(jitter.width=2, dodge.width = 0), pch=21, aes(x=factor(Sample_Type2, level = c("AdultFemale", "Larva", "LarvalWater", "Water", "Sugar", "FishFood")), y=Shannon, fill=Sample_Type2)) +
+  scale_fill_manual(values = colours)+
+  scale_colour_manual(values = colours) +
+  coord_cartesian(ylim=c(0,6)) + # adjust y-axis
+  xlab("Sample Types") +
+  ylab("Shannon's Index")  +
+  theme_pubr() +
+# geom_jitter(width = 0.2, size=1.5) +
+  theme(legend.position="none")+ #remove the legend as it isn't needed
+  facet_grid(~Building)
+
+p1
+
+```
+
+
+
+
+
+### alpha div plot option 2
+
+
+```{r}
+
+p2 <- temp %>%
+  ggplot+
+  geom_boxplot(outlier.shape = NA, pch = NA) +
+  aes(x=factor(for_ordering, level = c("AA", "CA", "MA", "AL", "CL", "ML", "ALW", "CLW", "MLW", "AW", "CW", "MW", "AS", "CS", "MS", "AF", "CF", "MF")), y=Shannon, fill=Building) +
+  geom_point(position=position_jitterdodge(jitter.width=2, dodge.width = 0), pch=21, aes(x=factor(for_ordering, level = c("AA", "CA", "MA", "AL", "CL", "ML", "ALW", "CLW", "MLW", "AW", "CW", "MW", "AS", "CS", "MS", "AF", "CF", "MF")), y=Shannon, fill=Building)) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+  coord_cartesian(ylim=c(0,5)) + # adjust y-axis
+  xlab("Sample Types") +
+  ylab("Shannon's Index")  +
+  theme_pubr() +
+  theme(legend.position="right")
+ # facet_wrap(~Sample_Type2) 
+
+
+p2
+
+```
+
+
+### alpha div plot option 3 
+-use this one
+
+```{r}
+
+p3 <- ggplot(temp, aes(x=Building, y=Shannon, fill=Building)) +
+   geom_boxplot(outlier.shape = NA) +
+  geom_point(position=position_jitterdodge(jitter.width=2, dodge.width = 0), pch=21, aes(x=Building, y=Shannon, fill=Building)) + 
+   scale_fill_manual(values = colours2) +
+  facet_grid(~factor(Sample_Type2, levels=c("AdultFemale", "Larva", "LarvalWater", "Water", "Sugar", "FishFood")), scales = "free", space = "free")  +
+  xlab("") +
+  ylab("Shannon's Index")  +
+ # theme_pubr()+
+  theme(axis.text.x=element_blank())# +
+ # coord_cartesian(ylim=c(0, 5.5))
+  
+p3
+
+```
+## alpha stats
+
+### Are there differences between sample types?
+
+```{r}
+
+#Use kruskal wallis, a non-parametric test for global statistic 
+kruskal.test(Shannon ~ Sample_Type2, data = temp)
+
+```
+
+Yes, so where are the differences?
+
+
+```{r}
+# not sure which is better here - read later
+#dunn.test(temp$Shannon, temp$Sample_Type2, method = "bonferroni") 
+
+
+pairwise.wilcox.test(temp$Shannon, temp$Sample_Type2,
+                 p.adjust.method = "BH")
+
+```
+There are many differences here
+
+### now, within each sample type, are there differences between insectaries?
+
+adult female
+
+```{r}
+
+shannon_adult <- subset(temp, temp$Sample_Type2 == "AdultFemale")
+
+kruskal.test(Shannon ~ Building, data = shannon_adult) # p-value = 0.3824 - no difference
+
+
+```
+
+Larvae
+
+```{r}
+
+shannon_larvae <- subset(temp, temp$Sample_Type2 == "Larva")
+
+kruskal.test(Shannon ~ Building, data = shannon_larvae) # p-value = 2.099e-10 - difference
+
+
+```
+
+```{r}
+
+#dunn.test(shannon_larvae$Shannon, shannon_larvae$Building, method = "bonferroni") 
+pairwise.wilcox.test(shannon_larvae$Shannon, shannon_larvae$Building,
+                 p.adjust.method = "BH")
+```
+
+Larval Water
+
+```{r}
+
+shannon_larval_water <- subset(temp, temp$Sample_Type2 == "LarvalWater")
+
+kruskal.test(Shannon ~ Building, data = shannon_larval_water) # p-value = 1.44e-05 - difference
+
+```
+
+```{r}
+
+#dunn.test(shannon_larval_water$Shannon, shannon_larval_water$Building, method = "bonferroni") 
+pairwise.wilcox.test(shannon_larval_water$Shannon, shannon_larval_water$Building,
+                 p.adjust.method = "BH")
+```
+
+
+Water
+
+```{r}
+
+shannon_water <- subset(temp, temp$Sample_Type2 == "Water")
+
+kruskal.test(Shannon ~ Building, data = shannon_water) # p-value = 0.2921 - no difference
+
+```
+
+Sugar
+
+```{r}
+
+shannon_sugar <- subset(temp, temp$Sample_Type2 == "Sugar")
+
+kruskal.test(Shannon ~ Building, data = shannon_sugar) # p-value = 0.003042 - difference
+
+```
+
+```{r}
+
+#dunn.test(shannon_sugar$Shannon, shannon_sugar$Building, method = "bonferroni") 
+pairwise.wilcox.test(shannon_sugar$Shannon, shannon_sugar$Building,
+                 p.adjust.method = "BH")
+
+```
+
+fish food
+
+```{r}
+
+shannon_food <- subset(temp, temp$Sample_Type2 == "FishFood")
+
+kruskal.test(Shannon ~ Building, data = shannon_food) # p-value = 0.1133 - no difference
+
+```
+Now add on these stats to the plots in Illustrator
+
+
+## beta diversity
+
+Not doing Hellinger transformation (as is suggested by the microbiotaProcess tutorial/vignette) as the input data are rarefied
+
+### bray curtis first
+
+```{r}
+mpse_bray <- mpse %>% mp_cal_dist(.abundance=Abundance, distmethod = "bray")
+# I don't seem to be able to do unifac and bray together so doing one at a time
+mpse_bray
+
+```
+
+
+```{r}
+#p4 <- mpse_bray %>% mp_plot_dist(.distmethod = bray, .group = Sample_Type2)
+#p4 # this makes a heatmap which is not informative here
+
+#calculate principal components from dissimilarity
+mpse_bray <- mpse_bray %>%
+  mp_cal_pcoa(.abundance = Abundance, distmethod = "bray")
+
+temp2 <- mp_extract_sample(mpse_bray)
+# this makes a strange structure, with the bray column looking odd but should be fine for plotting, think about stats later
+
+```
+
+
+
+The default plot
+
+```{r}
+
+p5 <- mpse_bray %>% 
+  mp_plot_ord(
+    .ord = pcoa,
+    .group = Sample_Type2,
+    .color = Sample_Type2,
+    .size = 1.2,
+    .alpha = 1,
+    ellipse = TRUE
+  )+
+  scale_fill_manual(values = colours) +
+  scale_colour_manual(values = colours)
+
+p5
+
+
+```
+
+
+This is fine and shows groupings, but trying to visualise in a more customisable way
+
+
+```{r}
+
+p6 <- temp2 %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Sample_Type2), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours)+
+  scale_colour_manual(values = colours) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Sample_Type2), geom = "polygon", alpha = 0.25)# +
+ # theme_pubr()# +
+# theme(legend.position="none") + #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+p6 
+```
+go with this one and edit to give elipses edge lines in illustrator.
+
+...and slightly differently to fix ellipse colours
+
+```{r}
+p7 <-  ggplot(temp2, aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, color=Sample_Type2)) +
+  geom_point(pch=21, size=4, alpha=1) +
+  scale_fill_manual(values = colours)+
+  scale_color_manual(values = colours) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+  stat_ellipse()
+
+
+p7 
+
+```
+
+```{r}
+
+shapes <- 
+
+px <- temp2 %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, color=Sample_Type2, shape=Building),  size=4, alpha=1) +
+  scale_shape_manual(values = c(1, 4, 0)) +
+  scale_fill_manual(values = colours)+
+  scale_colour_manual(values = colours) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Sample_Type2), geom = "polygon", alpha = 0.25)# +
+ # theme_pubr()# +
+# theme(legend.position="none") + #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+px 
+```
+
+### unweighted unifrac
+
+```{r}
+mpse_uni <- mpse %>% mp_cal_dist(.abundance=Abundance, distmethod = "unifrac")
+mpse_uni
+
+```
+
+```{r}
+
+#calculate pcoa distances dissimilarity
+mpse_uni <- mpse_uni %>%
+  mp_cal_pcoa(.abundance = Abundance, distmethod = "unifrac")
+
+temp3 <- mp_extract_sample(mpse_uni)
+# this makes a strange structure, with the bray column looking odd but should be fine for plotting, think about stats later
+
+```
+
+
+
+```{r}
+
+p8 <- temp3 %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Sample_Type2), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours)+
+  scale_colour_manual(values = colours) +
+   xlab("PCo1 (20.38%)") +
+  ylab("PCo2 (6.01%)")  +
+  ggtitle("unweighted unifrac") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Sample_Type2), geom = "polygon", alpha = 0.25)
+ # theme_pubr() +
+ # theme(legend.position="none")+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+p8
+
+```
+
+
+show next to each other
+
+```{r}
+
+p6 + p8
+
+```
+
+
+```{r}
+
+
+py <- temp3 %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, color=Sample_Type2, shape=Building),  size=4, alpha=1) +
+  scale_shape_manual(values = c(1, 4, 0)) +
+  scale_fill_manual(values = colours)+
+  scale_colour_manual(values = colours) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("unweighted unifrac") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Sample_Type2), geom = "polygon", alpha = 0.25)# +
+ # theme_pubr()# +
+# theme(legend.position="none") + #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+py
+```
+
+## do samples from different insectaries group together
+
+I'm going to use the overall beta diversity metrics but visualise differently to see whether there is separation between insectaries. I'll separate them out to see more clearly given the strong separation between sample types.
+
+### bray
+
+```{r}
+bray_adult <- subset(temp2, temp2$Sample_Type2 == "AdultFemale")
+
+p9 <- bray_adult %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Adult female") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p9 
+
+```
+
+```{r}
+bray_larva <- subset(temp2, temp2$Sample_Type2 == "Larva")
+
+p10 <- bray_larva %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Larva") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p10 
+
+```
+```{r}
+bray_larvalwater <- subset(temp2, temp2$Sample_Type2 == "LarvalWater")
+
+p11 <- bray_larvalwater %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Larval Water") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p11 
+
+```
+
+```{r}
+bray_water <- subset(temp2, temp2$Sample_Type2 == "Water")
+
+p12 <- bray_water %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Tap Water") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p12 
+
+```
+
+```{r}
+bray_food <- subset(temp2, temp2$Sample_Type2 == "FishFood")
+
+p13 <- bray_food %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Fish Food") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p13 
+
+```
+
+
+```{r}
+bray_sugar <- subset(temp2, temp2$Sample_Type2 == "Sugar")
+
+p14 <- bray_sugar %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Sugar") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p14 
+
+```
+
+
+```{r}
+p9 + p10 + p11 + p12 + p13 + p14
+
+```
+
+
+...or simpler...
+
+
+```{r}
+
+p15 <- temp2 %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (9.75%)") +
+  ylab("PCo2 (3.66%)")  +
+ ggtitle("bray curtis - Sugar") +
+  stat_ellipse(aes(x=`PCo1 (9.75%)`, y=`PCo2 (3.66%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")+ #remove the legend as it isn't needed
+  facet_wrap(~Sample_Type2, nrow = 2, ncol = 3)
+
+
+p15 
+
+```
+
+less obvious like this, looks clearer when you zoom in
+
+
+### unweighted unifrac
+
+```{r}
+uw_adult <- subset(temp3, temp3$Sample_Type2 == "AdultFemale")
+
+p16 <- uw_adult %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%))") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac - Adult female") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p16 
+
+```
+
+
+```{r}
+uw_larva <- subset(temp3, temp3$Sample_Type2 == "Larva")
+
+p17 <- uw_larva %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%))") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac - Larva") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p17 
+
+```
+
+```{r}
+uw_larvalwater <- subset(temp3, temp3$Sample_Type2 == "LarvalWater")
+
+p18 <- uw_larvalwater %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%))") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac - Larval Water") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p18 
+
+```
+
+```{r}
+uw_water <- subset(temp3, temp3$Sample_Type2 == "Water")
+
+p19 <- uw_water %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%))") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac - Water") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p19 
+
+```
+
+```{r}
+uw_sugar <- subset(temp3, temp3$Sample_Type2 == "Sugar")
+
+p20 <- uw_sugar %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%))") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac - Suagr") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p20 
+
+```
+
+
+```{r}
+uw_fishfood <- subset(temp3, temp3$Sample_Type2 == "FishFood")
+
+p21 <- uw_fishfood %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%))") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac - Fish Food") +
+  stat_ellipse(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+ theme(legend.position="none")#+ #remove the legend as it isn't needed
+ # facet_grid(~Building)
+
+
+p21 
+
+```
+
+
+```{r}
+p16 + p17 + p18 + p19 + p20 + p21
+
+```
+
+
+or faceting for comparison
+
+
+
+```{r}
+
+p22 <- temp3 %>%
+  ggplot+
+  geom_point(aes(x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), pch=21, size=4, alpha=0.5) +
+  scale_fill_manual(values = colours2)+
+  scale_colour_manual(values = colours2) +
+   xlab("PCo1 (20.38%)") +
+  ylab("PCo2 (6.01%)")  +
+ ggtitle("unweighted unifrac") +
+  stat_ellipse(aes (x=`PCo1 (20.38%)`, y=`PCo2 (6.01%)`, fill=Building), geom = "polygon", alpha = 0.25) +
+ # theme_pubr() +
+# theme(legend.position="none")+ #remove the legend as it isn't needed
+  facet_wrap(~Sample_Type2, nrow = 2, ncol = 3)
+
+
+p22 
+
+```
+
+
+
+# still need beta div stats. come back to this.
+
+# below not working for now
+
+are the bray curtis dissimilarities between groups statistically significant?
+
+-just the sampletypes for now, return to this later - not working for now, it says adonis has been calculated but then result is null
+
+```{r}
+#mpse_bray %>%
+#  mp_adonis(.abundance = Abundance, .formula = ~Sample_Type2, distmethod = "bray", permutations = 9999, action = "add")
+
+
+#bray_adonis_result <- mpse_bray %>% 
+#  mp_extract_internal_attr(name = "adonis") # null - don't know why
+
+```
