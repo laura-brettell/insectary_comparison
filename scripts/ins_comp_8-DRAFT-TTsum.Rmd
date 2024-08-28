@@ -1,0 +1,146 @@
+---
+title: "Ins_comp_8-TTsum"
+output: html_document
+date: "2024-07-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## TinyTag summaries
+
+TinyTag data as received from Laura via emails; copied raw values into text document via vi as xls sheet has formatting.
+
+```{r libraries_cols}
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+library(onewaytests)
+
+colours2 <- c(
+  "C" = "#00A087FF",
+  "A" = "#3C5488FF",
+  "B" = "#9C58A1"
+)
+
+tinytag <- read.table("TT_data.tsv", header=T)
+
+```
+
+## Plots
+
+Trying to show summaries to better illustratey how different especially insectaries A and B are from C in terms of stability of environmental factors.
+
+```{r plots_boxplot}
+
+data_summary <- function(x) {
+   m <- mean(x)
+   ymin <- m-sd(x)
+   ymax <- m+sd(x)
+   return(c(y=m,ymin=ymin,ymax=ymax))
+}
+
+p <- ggplot(tinytag, aes(x=insectary, y=Temperature, fill=insectary)) +
+  geom_violin() +
+  scale_fill_manual(values=colours2) +
+  stat_summary(fun.data=data_summary) +
+  theme_minimal() +
+  labs(title="Temperature measurements",x="Insectary", y = "Temperature (C)")
+
+p2 <- ggplot(tinytag, aes(x=insectary, y=Humidity, fill=insectary)) +
+  geom_violin() +
+  scale_fill_manual(values=colours2) +
+  stat_summary(fun.data=data_summary) +
+  theme_minimal() +
+  labs(title="Humidity measurements",x="Insectary", y = "Humidity (% RH)")
+
+
+p3 <- ggplot(tinytag, aes(x=insectary, y=Temperature, fill=insectary)) +
+  geom_violin() +
+  scale_fill_manual(values=colours2) +
+  geom_boxplot(width=0.1, fill="white", alpha=0.3) +
+  theme_minimal() +
+  labs(title="Temperature measurements",x="Insectary", y = "Temperature (C)")
+
+p4 <- ggplot(tinytag, aes(x=insectary, y=Humidity, fill=insectary)) +
+  geom_violin() +
+  scale_fill_manual(values=colours2) +
+  geom_boxplot(width=0.1, fill="white", alpha=0.3) +
+  theme_minimal() +
+  labs(title="Humidity measurements",x="Insectary", y = "Humidity (% RH)")
+
+p3 + p4 + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') +  plot_annotation(title = 'TinyTag data')
+
+pdf("TidyTag_summaries_boxplots.pdf", width=7, height=4)
+p3 + p4 + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') +  plot_annotation(title = 'TinyTag data')
+dev.off()
+```
+
+Prefer the ones with the integrated boxplot, but could also show with the stats as bar
+
+```{r layout_2}
+
+p + p2 + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') +  plot_annotation(title = 'TinyTag data')
+
+pdf("TidyTag_summaries_stats.pdf", width=7, height=4)
+p + p2 + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') +  plot_annotation(title = 'TinyTag data')
+dev.off()
+```
+
+Can also try to add a line for the temperature they were set at, to maybe show this a bit better as they are obviously supposed to be at different heights:
+
+```{r}
+
+customLines <- data.frame(insectary = c('A', 'B', 'C'),
+                          value = c(27, 25, 26))
+
+customLines <- customLines %>% 
+  mutate(fac = as.integer(factor(insectary, levels = insectary)))
+
+p2 <- ggplot(tinytag, aes(x=insectary, y=Temperature, fill=insectary, colour=insectary)) +
+  geom_violin(alpha=0.5) +
+  scale_fill_manual(values=colours2) +
+  scale_color_manual(values=colours2) +
+  theme_minimal() +
+  labs(title="Temperature measurements",x="Insectary", y = "Temperature (C)")
+
+violin_width <- ggplot_build(p2)$data[[1]] %>% 
+  group_by(x) %>% 
+  summarize(width = max(violinwidth)) %>% 
+  left_join(customLines, by = c("x" = "fac"))
+
+p2 + 
+  geom_segment(data = violin_width, 
+               aes(x = x - width/2, y = value, xend = x + width/2, yend = value))
+
+```
+
+Not sure I like this, leaving the plots with the boxplots for now. 
+
+
+Taking a look at the data spread
+
+```{r}
+
+tinytag %>%
+     group_by(insectary) %>%
+     summarize(var=var(Temperature))
+
+bf.test(Temperature ~ insectary, data = tinytag)
+
+
+tinytag %>%
+     group_by(insectary) %>%
+     summarize(var=var(Humidity))
+
+bf.test(Humidity ~ insectary, data = tinytag)
+
+```
+
+I thought it doesn't really make sense to test for statistical significant differences between the temperature and the humidity as such as they are set, i.e. obviously, if we set them different they will be different... but I tested for significant difference in spread of data, and that is (unsurprisingly) the case for both.
+
+
+
+
+
