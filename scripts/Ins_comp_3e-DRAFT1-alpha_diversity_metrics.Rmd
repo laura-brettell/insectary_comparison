@@ -1,0 +1,244 @@
+---
+title: "Ins_comp_3e-alpha_diversity_metrics"
+author: "laura"
+date: "2024-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The project
+
+Does rearing in a different insectary affect the mosquito microbiome?
+
+# The setup
+
+one cohort of Ae aegypti eggs were split into 3 and reared in standard conditions to see how their microbiomes varied between insectaries at diff life stages.
+
+
+https://bioconductor.org/packages/release/bioc/vignettes/MicrobiotaProcess/inst/doc//MicrobiotaProcess.html
+
+
+# Install packages
+
+```{r}
+# phyloseq itself
+#if(!requireNamespace("BiocManager")){
+#  install.packages("BiocManager")
+#   }
+#BiocManager::install("phyloseq")
+
+# if (!requireNamespace("BiocManager", quietly=TRUE))
+ #   install.packages("BiocManager")
+## BiocManager::install("BiocUpgrade") ## you may need this
+#BiocManager::install("MicrobiotaProcess")
+ 
+
+library(phyloseq)
+library(ggplot2)
+library(dplyr) 
+library(MicrobiotaProcess)
+library(gghalves)
+library(ggh4x)
+library(ggpubr)
+library(dunn.test)
+library(scales) 
+library(pairwiseAdonis)
+
+```
+
+# import data
+
+```{r}
+ps = readRDS("physeq_obj_3974") 
+
+```
+
+
+# Firstly, using the microbiotaprocess package
+I've not ended up plotting with this now, so it's a bit of a long way round but fine
+
+```{r}
+# convert phyloseq object to mpse to use with MicrobiotaProcess package
+mpse <- ps %>% as.MPSE() 
+
+mpse
+
+```
+
+## alpha diversity
+
+First do the calculations
+
+```{r}
+mpse %<>% 
+    mp_cal_alpha(.abundance=Abundance)
+mpse
+
+```
+originally I plotted directly from this, using the microbiotaprocess functions but it wasn't as customizable, so I've decided to take out the data and then plot
+
+try extracting and plotting differently, so I can facet
+
+```{r}
+temp <- mp_extract_sample(mpse)
+
+```
+
+```{r}
+colours <- c(
+  "AdultFemale" = "#56187D", 
+  "FishFood" = "#AC0123", 
+  "Larva" = "#006347", 
+  "LarvalWater" = "#97D0A7", 
+  "Sugar" = "#EF9F26", 
+  "Sugar2" = "#E6CD69", 
+  "Water" = "#7AA8D7"
+)
+
+
+colours2 <- c(
+  "C-ACC" = "#00A087FF",
+  "A-CTID" = "#3C5488FF",
+  "B-MK" = "#9C58A1"
+)
+
+```
+
+
+### alpha div plot
+
+```{r}
+
+plot_alpha <- ggplot(temp, aes(x=Building, y=Shannon, fill=Building)) +
+   geom_boxplot(outlier.shape = NA) +
+  geom_point(position=position_jitterdodge(jitter.width=2, dodge.width = 0), pch=21, aes(x=Building, y=Shannon, fill=Building)) + 
+   scale_fill_manual(values = colours2) +
+  facet_grid(~factor(Sample_Type2, levels=c("Water", "FishFood", "LarvalWater", "Larva", "Sugar", "AdultFemale")), scales = "free", space = "free")  +
+  xlab("") +
+  ylab("Shannon's Index")  +
+  theme(axis.text.x=element_blank()) +
+  theme_bw()
+ 
+plot_alpha
+
+```
+
+
+```{r}
+pdf("alpha_div_plot.pdf", width = 8, height = 3)
+plot_alpha
+dev.off()
+
+```
+## alpha stats
+
+### Are there differences between sample types?
+
+```{r}
+
+#Use kruskal wallis, a non-parametric test for global statistic 
+kruskal.test(Shannon ~ Sample_Type2, data = temp)
+
+```
+
+Yes, so where are the differences?
+
+
+```{r}
+dunn.test(temp$Shannon, temp$Sample_Type2, method = "bonferroni") 
+
+```
+There are many differences here
+
+### now, within each sample type, are there differences between insectaries?
+
+Here, I am subsetting the data according to sample type then performing kruskal wallace test within each sample type to determine whether there are differences between insectary (called 'building' in metadata).
+
+adult female
+
+```{r}
+
+shannon_adult <- subset(temp, temp$Sample_Type2 == "AdultFemale")
+
+kruskal.test(Shannon ~ Building, data = shannon_adult) # p-value = 0.3824 - no difference
+
+
+```
+
+Larvae
+
+```{r}
+
+shannon_larvae <- subset(temp, temp$Sample_Type2 == "Larva")
+
+kruskal.test(Shannon ~ Building, data = shannon_larvae) # p-value = 2.099e-10 - difference
+
+
+```
+
+```{r}
+
+dunn.test(shannon_larvae$Shannon, shannon_larvae$Building, method = "bonferroni") 
+
+```
+
+Larval Water
+
+```{r}
+
+shannon_larval_water <- subset(temp, temp$Sample_Type2 == "LarvalWater")
+
+kruskal.test(Shannon ~ Building, data = shannon_larval_water) # p-value = 1.44e-05 - difference
+
+```
+
+```{r}
+
+dunn.test(shannon_larval_water$Shannon, shannon_larval_water$Building, method = "bonferroni") 
+
+```
+
+
+Water
+
+```{r}
+
+shannon_water <- subset(temp, temp$Sample_Type2 == "Water")
+
+kruskal.test(Shannon ~ Building, data = shannon_water) # p-value = 0.2921 - no difference
+
+```
+
+Sugar
+
+```{r}
+
+shannon_sugar <- subset(temp, temp$Sample_Type2 == "Sugar")
+
+kruskal.test(Shannon ~ Building, data = shannon_sugar) # p-value = 0.003042 - difference
+
+```
+
+```{r}
+
+dunn.test(shannon_sugar$Shannon, shannon_sugar$Building, method = "bonferroni") 
+
+
+```
+
+fish food
+
+```{r}
+
+shannon_food <- subset(temp, temp$Sample_Type2 == "FishFood")
+
+kruskal.test(Shannon ~ Building, data = shannon_food) # p-value = 0.1133 - no difference
+
+```
+
+
+
+
