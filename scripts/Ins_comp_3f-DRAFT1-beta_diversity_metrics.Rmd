@@ -1,0 +1,1164 @@
+---
+title: "Ins_comp_3c-beta_diversity_metrics"
+author: "laura"
+date: "2024-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The project
+
+Does rearing in a different insectary affect the mosquito microbiome?
+
+# The setup
+
+one cohort of Ae aegypti eggs were split into 3 and reared in standard conditions to see how their microbiomes varied between insectaries at diff life stages.
+
+Analysis of beta diversity - bray curtis and unweighted unifrac
+
+https://bioconductor.org/packages/release/bioc/vignettes/MicrobiotaProcess/inst/doc//MicrobiotaProcess.html
+can also look at https://www.yanh.org/2021/01/01/microbiome-r/
+
+### Install packages
+
+```{r}
+# phyloseq itself
+#if(!requireNamespace("BiocManager")){
+#  install.packages("BiocManager")
+#   }
+#BiocManager::install("phyloseq")
+
+# if (!requireNamespace("BiocManager", quietly=TRUE))
+ #   install.packages("BiocManager")
+## BiocManager::install("BiocUpgrade") ## you may need this
+#BiocManager::install("MicrobiotaProcess")
+ 
+library(phyloseq)
+library(ggplot2)
+library(dplyr) 
+library(ggpubr)
+library(dunn.test)
+library(pairwiseAdonis)
+library(vegan)
+
+```
+
+### import data
+
+```{r}
+ps = readRDS("physeq_obj_3974") # currently phyloseq obj
+
+```
+
+### the colours I'll use
+
+```{r}
+colours <- c(
+  "AdultFemale" = "#56187D", 
+  "FishFood" = "#AC0123", 
+  "Larva" = "#006347", 
+  "LarvalWater" = "#97D0A7", 
+  "Sugar" = "#EF9F26", 
+  "Sugar2" = "#E6CD69", 
+  "Water" = "#7AA8D7"
+)
+
+
+colours2 <- c(
+  "C-ACC" = "#00A087FF",
+  "A-CTID" = "#3C5488FF",
+  "B-MK" = "#9C58A1"
+)
+
+```
+
+## beta diversity
+
+Not doing Hellinger transformation (as is suggested by the microbiotaProcess tutorial/vignette) as the input data are rarefied
+
+# bray curtis first
+
+### firstly, all data together
+
+description from : https://scienceparkstudygroup.github.io/microbiome-lesson/06-beta-diversity/index.html
+
+Statistical test
+To test whether the groups are different with respect to centroid and dispersion, a PERMANOVA statistical test will be performed. For this a multivariate extension of ANOVA will be used, as there are many OTU that will be used in the test. The extension is based on distances between samples. The test compares distances of samples within the same group to distances of samples from different groups. If the distance between samples from the different groups is much larger than samples from the same group, we conclude that the groups are not equal.
+
+In order to test the significance of the result, a permutation test is used. Thus all samples are randomly mixed over the groups and the test is repeated many times. If the ratio (between group distance / within group distance) is much larger for the original data than for the permutations, we conclude there is a statistical significant difference.
+
+The test can be applied in combination with any distance measure. 
+
+
+```{r}
+bray_dist = phyloseq::distance(ps, method="bray", weighted=F) # calculate distances
+ordination = ordinate(ps, method="PCoA", distance=bray_dist) # ordinate
+
+```
+
+```{r}
+# plot
+
+brayordplot <- plot_ordination(ps, ordination, color = "Sample_Type2") #basic plot
+
+p2 <- brayordplot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Sample_Type2))+
+  scale_fill_manual(values = colours)+
+  scale_color_manual(values = colours)+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  ggtitle("bray-curtis")
+
+
+p2$layers <- p2$layers[-1] # this removed a first layer that was a solid point which had resulted in double overlaying points
+
+p2  
+```
+overall differences by sample type and/or building. 
+
+First, easier if we take the data out of the phyloseq object
+
+
+```{r}
+sample_data <- as.data.frame(sample_data(ps))
+bray_dist_matrx = as.matrix(bray_dist)
+bray_dist_df <- cbind(rownames(bray_dist_matrx), data.frame(bray_dist_matrx, row.names =NULL))
+colnames(bray_dist_df)[1] <- "SampleID"
+colnames(sample_data)[1]<-"SampleID"
+bray_joined <- inner_join(bray_dist_df, sample_data, by = "SampleID") # combines the distance matrix with the metadata
+
+bray_joined[1:5, 245:252]
+
+```
+
+```{r}
+
+adonis2(formula = bray_dist ~ Sample_Type2 + Building + Sample_Type2:Building, data = bray_joined)
+# not included tray effects yet as not all samples have a tray so it can mess with the model, will assess tray effects only on the sample types with trays/cages.
+
+```
+
+yes, there's overall significant clustering by sample type and building separately, and an interacting effect.
+
+Next for pairwise.adonis to see where differences are. 
+
+```{r}
+pairwise.adonis2(bray_dist ~ Sample_Type2 + Building + Sample_Type2:Building, data = bray_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+
+next, use PERMDISP (permutational analysis of multivariate dispersions) to test whether the differences are due to differences in dispersion (variance) or locations of controids - draft stuff with the help of chatgpt - needs checking
+
+1. Set up betadisper():
+
+
+```{r}
+
+# Run betadisper for each grouping variable
+# For Sample_Type2
+disp_sample_type <- betadisper(bray_dist, bray_joined$Sample_Type2)
+
+# For Building
+disp_building <- betadisper(bray_dist, bray_joined$Building)
+
+# For the interaction Sample_Type2:Building
+disp_interaction <- betadisper(bray_dist, interaction(bray_joined$Sample_Type2, bray_joined$Building))
+
+
+```
+
+2.Test for significance of dispersion differences: Use permutest() to assess whether there are statistically significant differences in dispersion among groups.
+
+```{r}
+# Test for dispersion differences in Sample_Type2
+perm_disp_sample_type <- permutest(disp_sample_type, permutations = 999)
+print(perm_disp_sample_type)
+```
+
+significant (p < 0.05), it suggests that there may be differences in the spread (dispersion) of samples within groups, which could potentially explain some of the differences detected by adonis2. If results were not significant (p > 0.05), it would suggest that differences found with adonis2 are more likely due to differences in the location of centroids rather than dispersion.
+
+```{r}
+# Test for dispersion differences in Building
+perm_disp_building <- permutest(disp_building, permutations = 999)
+print(perm_disp_building)
+```
+
+
+```{r}
+# Test for dispersion differences in the interaction Sample_Type2:Building
+perm_disp_interaction <- permutest(disp_interaction, permutations = 999)
+print(perm_disp_interaction)
+
+```
+significant
+
+
+chatgpt suggested I could visualise the outputs as boxplots - delete this for github, not really needed
+
+```{r}
+# Boxplot of distances to centroid for each grouping variable
+boxplot(disp_sample_type, main = "Dispersion by Sample_Type2")
+boxplot(disp_building, main = "Dispersion by Building")
+boxplot(disp_interaction, main = "Dispersion by Sample_Type2:Building")
+
+# Plot ordination to visually inspect dispersion
+plot(disp_sample_type)
+plot(disp_building)
+plot(disp_interaction)
+
+```
+
+
+#### now to subset the data to visualise and analyse between-insectary differences separately for each sample type
+
+
+```{r}
+
+#############  adults ############### 
+
+ps_adult <- subset_samples(ps, Sample_Type2 == "AdultFemale")
+
+adult_bray_dist = phyloseq::distance(ps_adult, method="bray", weighted=F)
+adult_ordination = ordinate(ps_adult, method="PCoA", distance=adult_bray_dist) 
+
+b_adult_plot <- plot_ordination(ps_adult, adult_ordination, color = "Building")  
+b_adult_plot <- b_adult_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("adults")+
+  theme_bw()
+  
+b_adult_plot$layers <- b_adult_plot$layers[-1] 
+
+
+############  larvae ############
+
+ps_larvae <- subset_samples(ps, Sample_Type2 == "Larva")
+
+larvae_bray_dist = phyloseq::distance(ps_larvae, method="bray", weighted=F)
+larvae_ordination = ordinate(ps_larvae, method="PCoA", distance=larvae_bray_dist) 
+
+b_larvae_plot <- plot_ordination(ps_larvae, larvae_ordination, color = "Building")  
+b_larvae_plot <- b_larvae_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("larvae")+
+  theme_bw()
+b_larvae_plot$layers <- b_larvae_plot$layers[-1] 
+
+
+###########  larval water ###########
+
+ps_larvalwater <- subset_samples(ps, Sample_Type2 == "LarvalWater")
+
+larvalwater_bray_dist = phyloseq::distance(ps_larvalwater, method="bray", weighted=F)
+larvalwater_ordination = ordinate(ps_larvalwater, method="PCoA", distance=larvalwater_bray_dist) 
+
+b_larvalwater_plot <- plot_ordination(ps_larvalwater, larvalwater_ordination, color = "Building")  
+b_larvalwater_plot <- b_larvalwater_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("larval water")+
+  theme_bw()
+b_larvalwater_plot$layers <- b_larvalwater_plot$layers[-1]
+
+
+###########  tap water ##############
+
+ps_water <- subset_samples(ps, Sample_Type2 == "Water")
+
+water_bray_dist = phyloseq::distance(ps_water, method="bray", weighted=F)
+water_ordination = ordinate(ps_water, method="PCoA", distance=water_bray_dist) 
+
+b_tap_water_plot <- plot_ordination(ps_water, water_ordination, color = "Building")  
+b_tap_water_plot <- b_tap_water_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("tap water")+
+  theme_bw()
+b_tap_water_plot$layers <- b_tap_water_plot$layers[-1]
+
+
+########### fish food ############
+
+ps_food <- subset_samples(ps, Sample_Type2 == "FishFood")
+
+food_bray_dist = phyloseq::distance(ps_food, method="bray", weighted=F)
+food_ordination = ordinate(ps_food, method="PCoA", distance=food_bray_dist) 
+
+b_food_plot <- plot_ordination(ps_food, food_ordination, color = "Building")  
+b_food_plot <- b_food_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("fish food")+
+  theme_bw()
+b_food_plot$layers <- b_food_plot$layers[-1]
+
+
+############ sugar ################
+
+ps_sugar <- subset_samples(ps, Sample_Type2 == "Sugar")
+
+sugar_bray_dist = phyloseq::distance(ps_sugar, method="bray", weighted=F)
+sugar_ordination = ordinate(ps_sugar, method="PCoA", distance=sugar_bray_dist) 
+
+b_sugar_plot <- plot_ordination(ps_sugar, sugar_ordination, color = "Building")  
+b_sugar_plot <- b_sugar_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("sugar")+
+  theme(legend.position="none") +
+  theme_bw()
+b_sugar_plot$layers <- b_sugar_plot$layers[-1]
+
+```
+
+
+show plots together
+
+```{r}
+pdf("bray_by_sampletype.pdf", width=7, height=5)
+p2a <- ggpubr::ggarrange(b_tap_water_plot, b_food_plot , b_larvae_plot , b_larvalwater_plot , b_sugar_plot, b_adult_plot , ncol = 3, nrow = 2, common.legend = TRUE, legend="bottom")
+
+p2a
+dev.off()
+
+```
+
+```{r}
+p2a
+```
+
+
+Are there differences between buildings, within each sample type and are there tray/cage effects?
+
+
+```{r}
+
+#############  adults ############### 
+
+adult_sample_data <- as.data.frame(sample_data(ps_adult))
+adult_bray_dist_matrx = as.matrix(adult_bray_dist)
+adult_bray_dist_df <- cbind(rownames(adult_bray_dist_matrx), data.frame(adult_bray_dist_matrx, row.names =NULL))
+colnames(adult_bray_dist_df)[1] <- "SampleID"
+colnames(adult_sample_data)[1]<-"SampleID"
+adult_bray_joined <- inner_join(adult_bray_dist_df, adult_sample_data, by = "SampleID") 
+
+adonis2(formula = adult_bray_dist ~ Building + Building/Tray_Cage, data = adult_bray_joined) # this is looking at building effects, and also the nested trays within building effects
+
+```
+
+```{r}
+pairwise.adonis2(adult_bray_dist ~ Building + Building/Tray_Cage, data = adult_bray_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+
+```{r}
+
+# Run betadisper for Building
+adult_disp_building <- betadisper(adult_bray_dist, adult_bray_joined$Building)
+
+# Test for dispersion differences in Building
+adult_perm_disp_building <- permutest(adult_disp_building, permutations = 999)
+print(adult_perm_disp_building)
+
+```
+
+significant
+
+```{r}
+
+# betadisperser doesn't support nested designs, so i need to run separately for each building. chat GPT suggested to basically subset the data for each sample type by building, but  don't think this is correct and really I should recalculate for each sample type + building combo separately, then look at differences between trays/cages. Here this is a long way round of doing this and really not efficient, but I will get results then look at a function to repeatedly do this
+
+
+# A
+ps_adult_A <- subset_samples(ps_adult, Building == "A-CTID")
+adult_A_bray_dist = phyloseq::distance(ps_adult_A, method="bray", weighted=F)
+adult_A_sample_data <- as.data.frame(sample_data(ps_adult_A))
+adult_A_bray_dist_matrx = as.matrix(adult_A_bray_dist)
+adult_A_bray_dist_df <- cbind(rownames(adult_A_bray_dist_matrx), data.frame(adult_A_bray_dist_matrx, row.names =NULL))
+colnames(adult_A_bray_dist_df)[1] <- "SampleID"
+colnames(adult_A_sample_data)[1]<-"SampleID"
+adult_A_bray_joined <- inner_join(adult_A_bray_dist_df, adult_A_sample_data, by = "SampleID") 
+
+adult_A_disp_Tray_Cage <- betadisper(adult_A_bray_dist, adult_A_bray_joined$Tray_Cage)
+adult_A_perm_disp_Tray_Cage <- permutest(adult_A_disp_Tray_Cage, permutations = 999)
+print(adult_A_perm_disp_Tray_Cage) # not signif
+
+
+# B
+ps_adult_B <- subset_samples(ps_adult, Building == "B-MK")
+adult_B_bray_dist = phyloseq::distance(ps_adult_B, method="bray", weighted=F)
+adult_B_sample_data <- as.data.frame(sample_data(ps_adult_B))
+adult_B_bray_dist_matrx = as.matrix(adult_B_bray_dist)
+adult_B_bray_dist_df <- cbind(rownames(adult_B_bray_dist_matrx), data.frame(adult_B_bray_dist_matrx, row.names =NULL))
+colnames(adult_B_bray_dist_df)[1] <- "SampleID"
+colnames(adult_B_sample_data)[1]<-"SampleID"
+adult_B_bray_joined <- inner_join(adult_B_bray_dist_df, adult_B_sample_data, by = "SampleID") 
+
+adult_B_disp_Tray_Cage <- betadisper(adult_B_bray_dist, adult_B_bray_joined$Tray_Cage)
+adult_B_perm_disp_Tray_Cage <- permutest(adult_B_disp_Tray_Cage, permutations = 999)
+print(adult_B_perm_disp_Tray_Cage) # not signif
+
+#C
+
+ps_adult_c <- subset_samples(ps_adult, Building == "C-ACC")
+adult_c_bray_dist = phyloseq::distance(ps_adult_c, method="bray", weighted=F)
+adult_c_sample_data <- as.data.frame(sample_data(ps_adult_c))
+adult_c_bray_dist_matrx = as.matrix(adult_c_bray_dist)
+adult_c_bray_dist_df <- cbind(rownames(adult_c_bray_dist_matrx), data.frame(adult_c_bray_dist_matrx, row.names =NULL))
+colnames(adult_c_bray_dist_df)[1] <- "SampleID"
+colnames(adult_c_sample_data)[1]<-"SampleID"
+adult_c_bray_joined <- inner_join(adult_c_bray_dist_df, adult_c_sample_data, by = "SampleID") 
+
+adult_c_disp_Tray_Cage <- betadisper(adult_c_bray_dist, adult_c_bray_joined$Tray_Cage)
+adult_c_perm_disp_Tray_Cage <- permutest(adult_c_disp_Tray_Cage, permutations = 999)
+print(adult_c_perm_disp_Tray_Cage) # not signif
+
+```
+
+
+```{r}
+# alternative using loop
+
+# Define the buildings and corresponding labels
+buildings <- c("A-CTID", "B-MK", "C-ACC")
+labels <- c("adult_A", "adult_B", "adult_C")
+
+# Initialize lists to store results
+bray_dists <- list()
+sample_data_frames <- list()
+dist_matrices <- list()
+joined_dfs <- list()
+disp_Tray_Cage <- list()
+perm_disp_Tray_Cage <- list()
+
+# Loop over each building
+for (i in seq_along(buildings)) {
+  # Subset samples for the current building
+  current_building <- buildings[i]
+  current_label <- labels[i]
+  
+  # Dynamically assign variable names
+  subset_data <- subset_samples(ps_adult, Building == current_building)
+  
+  # Calculate the Bray-Curtis distance
+  bray_dist <- phyloseq::distance(subset_data, method="bray", weighted=FALSE)
+  
+  # Get sample data and convert to a data frame
+  sample_data_df <- as.data.frame(sample_data(subset_data))
+  
+  # Convert Bray-Curtis distance to matrix and data frame
+  bray_dist_matrix <- as.matrix(bray_dist)
+  bray_dist_df <- cbind(rownames(bray_dist_matrix), data.frame(bray_dist_matrix, row.names=NULL))
+  colnames(bray_dist_df)[1] <- "SampleID"
+  colnames(sample_data_df)[1] <- "SampleID"
+  
+  # Join the distance data frame with sample data
+  bray_joined <- inner_join(bray_dist_df, sample_data_df, by="SampleID")
+  
+  # Beta dispersion and permutation test
+  disp_Tray_Cage_result <- betadisper(bray_dist, bray_joined$Tray_Cage)
+  perm_disp_Tray_Cage_result <- permutest(disp_Tray_Cage_result, permutations=999)
+  
+  # Print the results for each building
+  cat("Results for Building:", current_building, "\n")
+  print(perm_disp_Tray_Cage_result)
+  
+  # Store results in lists
+  bray_dists[[current_label]] <- bray_dist
+  sample_data_frames[[current_label]] <- sample_data_df
+  dist_matrices[[current_label]] <- bray_dist_matrix
+  joined_dfs[[current_label]] <- bray_joined
+  disp_Tray_Cage[[current_label]] <- disp_Tray_Cage_result
+  perm_disp_Tray_Cage[[current_label]] <- perm_disp_Tray_Cage_result
+}
+
+```
+# yep, reults are the same, or basically, the values differ slightly each time this is run (either way). The new code is 'better' but still really a similar number of lines.
+
+
+
+
+building significant for adults (both adonis2 and permdisp. not tray/cage or interaction (although at tray/cage level numbers of reps are getting small), tray/cage results not significant with permdisp either.
+
+```{r}
+
+#############  larvae ############### 
+
+larvae_sample_data <- as.data.frame(sample_data(ps_larvae))
+larvae_bray_dist_matrx = as.matrix(larvae_bray_dist)
+larvae_bray_dist_df <- cbind(rownames(larvae_bray_dist_matrx), data.frame(larvae_bray_dist_matrx, row.names =NULL))
+colnames(larvae_bray_dist_df)[1] <- "SampleID"
+colnames(larvae_sample_data)[1]<-"SampleID"
+larvae_bray_joined <- inner_join(larvae_bray_dist_df, larvae_sample_data, by = "SampleID") 
+
+adonis2(formula = larvae_bray_dist ~ Building + Building/Tray_Cage, data = larvae_bray_joined) 
+
+```
+
+```{r}
+pairwise.adonis2(larvae_bray_dist ~ Building + Building/Tray_Cage, data = larvae_bray_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+```{r}
+
+larvae_disp_building <- betadisper(larvae_bray_dist, larvae_bray_joined$Building)
+
+larvae_perm_disp_building <- permutest(larvae_disp_building, permutations = 999)
+print(larvae_perm_disp_building) # signif
+
+```
+
+```{r}
+
+
+# Initialize lists to store results
+L_bray_dists <- list()
+L_sample_data_frames <- list()
+L_dist_matrices <- list()
+L_joined_dfs <- list()
+L_disp_Tray_Cage <- list()
+L_perm_disp_Tray_Cage <- list()
+
+# Loop over each building
+for (i in seq_along(buildings)) {
+  # Subset samples for the current building
+  current_building <- buildings[i]
+  current_label <- labels[i]
+  
+  # Dynamically assign variable names
+  L_subset_data <- subset_samples(ps_larvae, Building == current_building)
+  
+  # Calculate the Bray-Curtis distance
+  L_bray_dist <- phyloseq::distance(L_subset_data, method="bray", weighted=FALSE)
+  
+  # Get sample data and convert to a data frame
+  L_sample_data_df <- as.data.frame(sample_data(L_subset_data))
+  
+  # Convert Bray-Curtis distance to matrix and data frame
+  L_bray_dist_matrix <- as.matrix(L_bray_dist)
+  L_bray_dist_df <- cbind(rownames(L_bray_dist_matrix), data.frame(L_bray_dist_matrix, row.names=NULL))
+  colnames(L_bray_dist_df)[1] <- "SampleID"
+  colnames(L_sample_data_df)[1] <- "SampleID"
+  
+  # Join the distance data frame with sample data
+  L_bray_joined <- inner_join(L_bray_dist_df, L_sample_data_df, by="SampleID")
+  
+  # Beta dispersion and permutation test
+  L_disp_Tray_Cage_result <- betadisper(L_bray_dist, L_bray_joined$Tray_Cage)
+  L_perm_disp_Tray_Cage_result <- permutest(L_disp_Tray_Cage_result, permutations=999)
+  
+  # Print the results for each building
+  cat("Results for Building Larvae:", current_building, "\n")
+  print(L_perm_disp_Tray_Cage_result)
+  
+  # Store results in lists
+  L_bray_dists[[current_label]] <- L_bray_dist
+  L_sample_data_frames[[current_label]] <- L_sample_data_df
+  L_dist_matrices[[current_label]] <- L_bray_dist_matrix
+  L_joined_dfs[[current_label]] <- L_bray_joined
+  L_disp_Tray_Cage[[current_label]] <- L_disp_Tray_Cage_result
+  L_perm_disp_Tray_Cage[[current_label]] <- L_perm_disp_Tray_Cage_result
+}
+
+```
+none significant
+
+
+
+```{r}
+
+#############  larval water ############### 
+
+larvalwater_sample_data <- as.data.frame(sample_data(ps_larvalwater))
+larvalwater_bray_dist_matrx = as.matrix(larvalwater_bray_dist)
+larvalwater_bray_dist_df <- cbind(rownames(larvalwater_bray_dist_matrx), data.frame(larvalwater_bray_dist_matrx, row.names =NULL))
+colnames(larvalwater_bray_dist_df)[1] <- "SampleID"
+colnames(larvalwater_sample_data)[1]<-"SampleID"
+larvalwater_bray_joined <- inner_join(larvalwater_bray_dist_df, larvalwater_sample_data, by = "SampleID") 
+
+adonis2(formula = larvalwater_bray_dist ~ Building + Building/Tray_Cage, data = larvalwater_bray_joined) 
+
+```
+
+```{r}
+pairwise.adonis2(larvalwater_bray_dist ~ Building + Building/Tray_Cage, data = larvalwater_bray_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+```{r}
+
+
+# Initialize lists to store results
+LW_bray_dists <- list()
+LW_sample_data_frames <- list()
+LW_dist_matrices <- list()
+LW_joined_dfs <- list()
+LW_disp_Tray_Cage <- list()
+LW_perm_disp_Tray_Cage <- list()
+
+# Loop over each building
+for (i in seq_along(buildings)) {
+  # Subset samples for the current building
+  current_building <- buildings[i]
+  current_label <- labels[i]
+  
+  # Dynamically assign variable names
+  LW_subset_data <- subset_samples(ps_larvalwater, Building == current_building)
+  
+  # Calculate the Bray-Curtis distance
+  LW_bray_dist <- phyloseq::distance(LW_subset_data, method="bray", weighted=FALSE)
+  
+  # Get sample data and convert to a data frame
+  LW_sample_data_df <- as.data.frame(sample_data(LW_subset_data))
+  
+  # Convert Bray-Curtis distance to matrix and data frame
+  LW_bray_dist_matrix <- as.matrix(LW_bray_dist)
+  LW_bray_dist_df <- cbind(rownames(LW_bray_dist_matrix), data.frame(LW_bray_dist_matrix, row.names=NULL))
+  colnames(LW_bray_dist_df)[1] <- "SampleID"
+  colnames(LW_sample_data_df)[1] <- "SampleID"
+  
+  # Join the distance data frame with sample data
+  LW_bray_joined <- inner_join(LW_bray_dist_df, LW_sample_data_df, by="SampleID")
+  
+  # Beta dispersion and permutation test
+  LW_disp_Tray_Cage_result <- betadisper(LW_bray_dist, LW_bray_joined$Tray_Cage)
+  LW_perm_disp_Tray_Cage_result <- permutest(LW_disp_Tray_Cage_result, permutations=999)
+  
+  # Print the results for each building
+  cat("Results for Building Larval water:", current_building, "\n")
+  print(LW_perm_disp_Tray_Cage_result)
+  
+  # Store results in lists
+  LW_bray_dists[[current_label]] <- LW_bray_dist
+  LW_sample_data_frames[[current_label]] <- LW_sample_data_df
+  LW_dist_matrices[[current_label]] <- LW_bray_dist_matrix
+  LW_joined_dfs[[current_label]] <- LW_bray_joined
+  LW_disp_Tray_Cage[[current_label]] <- LW_disp_Tray_Cage_result
+  LW_perm_disp_Tray_Cage[[current_label]] <- LW_perm_disp_Tray_Cage_result
+}
+
+```
+non significant
+
+```{r}
+
+#############  tap water ############### 
+
+tapwater_sample_data <- as.data.frame(sample_data(ps_water))
+tapwater_bray_dist_matrx = as.matrix(water_bray_dist)
+tapwater_bray_dist_df <- cbind(rownames(tapwater_bray_dist_matrx), data.frame(tapwater_bray_dist_matrx, row.names =NULL))
+colnames(tapwater_bray_dist_df)[1] <- "SampleID"
+colnames(tapwater_sample_data)[1]<-"SampleID"
+tapwater_bray_joined <- inner_join(tapwater_bray_dist_df, tapwater_sample_data, by = "SampleID") 
+
+adonis2(formula = water_bray_dist ~ Building, data = tapwater_bray_joined) # no tray effects tested for with tap water
+
+```
+
+```{r}
+pairwise.adonis2(water_bray_dist ~ Building, data = tapwater_bray_joined, p.adjust.method = "bonferroni", nperm = 999) 
+
+```
+
+```{r}
+
+#############  fish food  ############### 
+
+food_sample_data <- as.data.frame(sample_data(ps_food))
+food_bray_dist_matrx = as.matrix(food_bray_dist)
+food_bray_dist_df <- cbind(rownames(food_bray_dist_matrx), data.frame(food_bray_dist_matrx, row.names =NULL))
+colnames(food_bray_dist_df)[1] <- "SampleID"
+colnames(food_sample_data)[1]<-"SampleID"
+food_bray_joined <- inner_join(food_bray_dist_df, food_sample_data, by = "SampleID") 
+
+adonis2(formula = food_bray_dist ~ Building, data = food_bray_joined) # no tray effects tested for with food
+
+```
+
+```{r}
+pairwise.adonis2(food_bray_dist ~ Building, data = food_bray_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+```{r}
+
+#############  sugar solution ############### 
+
+sugar_sample_data <- as.data.frame(sample_data(ps_sugar))
+sugar_bray_dist_matrx = as.matrix(sugar_bray_dist)
+sugar_bray_dist_df <- cbind(rownames(sugar_bray_dist_matrx), data.frame(sugar_bray_dist_matrx, row.names =NULL))
+colnames(sugar_bray_dist_df)[1] <- "SampleID"
+colnames(sugar_sample_data)[1]<-"SampleID"
+sugar_bray_joined <- inner_join(sugar_bray_dist_df, sugar_sample_data, by = "SampleID") 
+
+adonis2(formula = sugar_bray_dist ~ Building, data = sugar_bray_joined) 
+
+```
+
+```{r}
+pairwise.adonis2(sugar_bray_dist ~ Building, data = sugar_bray_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+
+
+# unweighted unifrac
+
+```{r}
+uw_dist = phyloseq::distance(ps, method="unifrac", weighted=F) 
+uw_ordination = ordinate(ps, method="PCoA", distance=uw_dist) 
+
+```
+
+```{r}
+# plot
+
+uwordplot <- plot_ordination(ps, uw_ordination, color = "Sample_Type2") 
+
+p3 <- uwordplot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Sample_Type2))+
+  scale_fill_manual(values = colours)+
+  scale_color_manual(values = colours)+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  ggtitle("unweighted Unifrac")
+
+
+p3$layers <- p3$layers[-1] 
+
+p3  
+```
+
+
+plotting both uw and bray with all data
+
+
+```{r}
+pdf("bray_uw_by_sampletype.pdf", width=5, height=10)
+
+p4 <- ggpubr::ggarrange(p2, p3, ncol = 1, nrow = 2, common.legend = TRUE, legend="bottom")
+p4
+dev.off()
+
+```
+
+
+overall differences by sample type and/or building. 
+
+```{r}
+uw_dist_matrx = as.matrix(uw_dist)
+uw_dist_df <- cbind(rownames(uw_dist_matrx), data.frame(uw_dist_matrx, row.names =NULL))
+colnames(uw_dist_df)[1] <- "SampleID"
+uw_joined <- inner_join(uw_dist_df, sample_data, by = "SampleID") 
+
+adonis2(formula = uw_dist ~ Sample_Type2 + Building + Sample_Type2:Building, data = uw_joined)
+
+```
+
+```{r}
+pairwise.adonis2(uw_dist ~ Sample_Type2 + Building + Sample_Type2:Building, data = uw_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+```{r}
+
+uw_disp_sample_type <- betadisper(uw_dist, uw_joined$Sample_Type2)
+uw_disp_building <- betadisper(uw_dist, uw_joined$Building)
+uw_disp_interaction <- betadisper(uw_dist, interaction(uw_joined$Sample_Type2, uw_joined$Building))
+
+uw_perm_disp_sample_type <- permutest(uw_disp_sample_type, permutations = 999)
+print(uw_perm_disp_sample_type) # signif 
+uw_perm_disp_building <- permutest(uw_disp_building, permutations = 999)
+print(uw_perm_disp_building) # not signif
+uw_perm_disp_interaction <- permutest(uw_disp_interaction, permutations = 999)
+print(uw_perm_disp_interaction) # signif
+```
+
+#### now to subset the data to visualise and analyse between-insectary differences separately for each sample type
+
+
+```{r}
+
+#############  adults ############### 
+
+adult_uw_dist = phyloseq::distance(ps_adult, method="unifrac", weighted=F)
+adult_uw_ordination = ordinate(ps_adult, method="PCoA", distance=adult_uw_dist) 
+
+uw_adult_plot <- plot_ordination(ps_adult, adult_uw_ordination, color = "Building")  
+uw_adult_plot <- uw_adult_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("adults")+
+  theme_bw()
+uw_adult_plot$layers <- uw_adult_plot$layers[-1] 
+
+
+############  larvae ############
+
+larvae_uw_dist = phyloseq::distance(ps_larvae, method="unifrac", weighted=F)
+larvae_uw_ordination = ordinate(ps_larvae, method="PCoA", distance=larvae_uw_dist) 
+
+uw_larvae_plot <- plot_ordination(ps_larvae, larvae_uw_ordination, color = "Building")  
+uw_larvae_plot <- uw_larvae_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("larvae")+
+  theme_bw()
+uw_larvae_plot$layers <- uw_larvae_plot$layers[-1] 
+
+
+###########  larval water ###########
+
+larvalwater_uw_dist = phyloseq::distance(ps_larvalwater, method="unifrac", weighted=F)
+larvalwater_uw_ordination = ordinate(ps_larvalwater, method="PCoA", distance=larvalwater_uw_dist) 
+
+uw_larvalwater_plot <- plot_ordination(ps_larvalwater, larvalwater_uw_ordination, color = "Building")  
+uw_larvalwater_plot <- uw_larvalwater_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("larval water")+
+  theme_bw()
+uw_larvalwater_plot$layers <- uw_larvalwater_plot$layers[-1]
+
+
+###########  tap water ##############
+
+water_uw_dist = phyloseq::distance(ps_water, method="unifrac", weighted=F)
+water_uw_ordination = ordinate(ps_water, method="PCoA", distance=water_uw_dist) 
+
+uw_tap_water_plot <- plot_ordination(ps_water, water_uw_ordination, color = "Building")  
+uw_tap_water_plot <- uw_tap_water_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("tap water")+
+  theme_bw()
+uw_tap_water_plot$layers <- uw_tap_water_plot$layers[-1]
+
+
+########### fish food ############
+
+food_uw_dist = phyloseq::distance(ps_food, method="unifrac", weighted=F)
+food_uw_ordination = ordinate(ps_food, method="PCoA", distance=food_uw_dist) 
+
+uw_food_plot <- plot_ordination(ps_food, food_uw_ordination, color = "Building")  
+uw_food_plot <- uw_food_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("fish food")+
+  theme_bw()
+uw_food_plot$layers <- uw_food_plot$layers[-1]
+
+
+############ sugar ################
+
+sugar_uw_dist = phyloseq::distance(ps_sugar, method="unifrac", weighted=F)
+sugar_uw_ordination = ordinate(ps_sugar, method="PCoA", distance=sugar_uw_dist) 
+
+uw_sugar_plot <- plot_ordination(ps_sugar, sugar_uw_ordination, color = "Building")  
+uw_sugar_plot <- uw_sugar_plot +
+  geom_point(size=4, alpha=0.5)+
+  stat_ellipse(geom = "polygon", alpha = 0.25, aes(fill = Building))+
+  scale_fill_manual(values = colours2)+
+  scale_color_manual(values = colours2)+
+  ggtitle("sugar")+
+   theme_bw()
+uw_sugar_plot$layers <- uw_sugar_plot$layers[-1]
+
+```
+
+
+show plots together
+ 
+
+```{r}
+pdf("uw_by_sampletype.pdf", width=7, height=5)
+p3a <- ggpubr::ggarrange(uw_tap_water_plot, uw_food_plot , uw_larvae_plot , uw_larvalwater_plot , uw_sugar_plot, uw_adult_plot , ncol = 3, nrow = 2, common.legend = TRUE, legend="bottom")
+
+p3a
+dev.off()
+
+```
+
+```{r}
+p3a
+```
+
+Are there differences between buildings, within each sample type and are there tray/cage effects?
+
+
+```{r}
+
+#############  adults ############### 
+
+adult_uw_dist_matrx = as.matrix(adult_uw_dist)
+adult_uw_dist_df <- cbind(rownames(adult_uw_dist_matrx), data.frame(adult_uw_dist_matrx, row.names =NULL))
+colnames(adult_uw_dist_df)[1] <- "SampleID"
+adult_uw_joined <- inner_join(adult_uw_dist_df, adult_sample_data, by = "SampleID") 
+
+adonis2(formula = adult_uw_dist ~ Building + Building/Tray_Cage, data = adult_uw_joined) 
+```
+
+```{r}
+pairwise.adonis2(adult_uw_dist ~ Building + Building/Tray_Cage, data = adult_uw_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+```{r}
+
+adult_uw_disp_building <- betadisper(adult_uw_dist, adult_uw_joined$Building)
+
+adult_uw_perm_disp_building <- permutest(adult_uw_disp_building, permutations = 999)
+print(adult_uw_perm_disp_building) # signif
+
+```
+
+```{r}
+
+adult_uw_dists <- list()
+adult_uw_sample_data_frames <- list()
+adult_uw_dist_matrices <- list()
+adult_uw_joined_dfs <- list()
+adult_uw_disp_Tray_Cage <- list()
+adult_uw_perm_disp_Tray_Cage <- list()
+
+for (i in seq_along(buildings)) {
+  current_building <- buildings[i]
+  current_label <- labels[i]
+  
+  adult_uw_subset_data <- subset_samples(ps_adult, Building == current_building)
+  
+  adult_uw_dist <- phyloseq::distance(adult_uw_subset_data, method="unifrac", weighted=FALSE)
+  
+  adult_uw_sample_data_df <- as.data.frame(sample_data(adult_uw_subset_data))
+  
+  adult_uw_dist_matrix <- as.matrix(adult_uw_dist)
+  adult_uw_dist_df <- cbind(rownames(adult_uw_dist_matrix), data.frame(adult_uw_dist_matrix, row.names=NULL))
+  colnames(adult_uw_dist_df)[1] <- "SampleID"
+  colnames(adult_uw_sample_data_df)[1] <- "SampleID"
+  
+  adult_uw_joined <- inner_join(adult_uw_dist_df, adult_uw_sample_data_df, by="SampleID")
+  
+  adult_uw_disp_Tray_Cage_result <- betadisper(adult_uw_dist, adult_uw_joined$Tray_Cage)
+  adult_uw_perm_disp_Tray_Cage_result <- permutest(adult_uw_disp_Tray_Cage_result, permutations=999)
+  
+  cat("Results for Building adult UW:", current_building, "\n")
+  print(adult_uw_perm_disp_Tray_Cage_result)
+  
+  adult_uw_dists[[current_label]] <- adult_uw_dist
+  adult_uw_sample_data_frames[[current_label]] <- adult_uw_sample_data_df
+  adult_uw_dist_matrices[[current_label]] <- adult_uw_dist_matrix
+  adult_uw_joined_dfs[[current_label]] <- adult_uw_joined
+  adult_uw_disp_Tray_Cage[[current_label]] <- adult_uw_disp_Tray_Cage_result
+  adult_uw_perm_disp_Tray_Cage[[current_label]] <- adult_uw_perm_disp_Tray_Cage_result
+}
+
+# none signif
+```
+
+
+```{r}
+
+#############  larvae ############### 
+
+larvae_uw_dist_matrx = as.matrix(larvae_uw_dist)
+larvae_uw_dist_df <- cbind(rownames(larvae_uw_dist_matrx), data.frame(larvae_uw_dist_matrx, row.names =NULL))
+colnames(larvae_uw_dist_df)[1] <- "SampleID"
+larvae_uw_joined <- inner_join(larvae_uw_dist_df, larvae_sample_data, by = "SampleID") 
+
+adonis2(formula = larvae_uw_dist ~ Building + Building/Tray_Cage, data = larvae_uw_joined) 
+
+```
+
+```{r}
+pairwise.adonis2(larvae_uw_dist ~ Building + Building/Tray_Cage, data = larvae_uw_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+
+```{r}
+
+larvae_uw_dists <- list()
+larvae_uw_sample_data_frames <- list()
+larvae_uw_dist_matrices <- list()
+larvae_uw_joined_dfs <- list()
+larvae_uw_disp_Tray_Cage <- list()
+larvae_uw_perm_disp_Tray_Cage <- list()
+
+for (i in seq_along(buildings)) {
+  current_building <- buildings[i]
+  current_label <- labels[i]
+  
+  larvae_uw_subset_data <- subset_samples(ps_larvae, Building == current_building)
+  
+  larvae_uw_dist <- phyloseq::distance(larvae_uw_subset_data, method="unifrac", weighted=FALSE)
+  
+  larvae_uw_sample_data_df <- as.data.frame(sample_data(larvae_uw_subset_data))
+  
+  larvae_uw_dist_matrix <- as.matrix(larvae_uw_dist)
+  larvae_uw_dist_df <- cbind(rownames(larvae_uw_dist_matrix), data.frame(larvae_uw_dist_matrix, row.names=NULL))
+  colnames(larvae_uw_dist_df)[1] <- "SampleID"
+  colnames(larvae_uw_sample_data_df)[1] <- "SampleID"
+  
+  larvae_uw_joined <- inner_join(larvae_uw_dist_df, larvae_uw_sample_data_df, by="SampleID")
+  
+  larvae_uw_disp_Tray_Cage_result <- betadisper(larvae_uw_dist, larvae_uw_joined$Tray_Cage)
+  larvae_uw_perm_disp_Tray_Cage_result <- permutest(larvae_uw_disp_Tray_Cage_result, permutations=999)
+  
+  cat("Results for Building larvae UW:", current_building, "\n")
+  print(larvae_uw_perm_disp_Tray_Cage_result)
+  
+  larvae_uw_dists[[current_label]] <- larvae_uw_dist
+  larvae_uw_sample_data_frames[[current_label]] <- larvae_uw_sample_data_df
+  larvae_uw_dist_matrices[[current_label]] <- larvae_uw_dist_matrix
+  larvae_uw_joined_dfs[[current_label]] <- larvae_uw_joined
+  larvae_uw_disp_Tray_Cage[[current_label]] <- larvae_uw_disp_Tray_Cage_result
+  larvae_uw_perm_disp_Tray_Cage[[current_label]] <- larvae_uw_perm_disp_Tray_Cage_result
+}
+
+# none signif
+```
+
+```{r}
+
+#############  larval water ############### 
+
+larvalwater_uw_dist_matrx = as.matrix(larvalwater_uw_dist)
+larvalwater_uw_dist_df <- cbind(rownames(larvalwater_uw_dist_matrx), data.frame(larvalwater_uw_dist_matrx, row.names =NULL))
+colnames(larvalwater_uw_dist_df)[1] <- "SampleID"
+larvalwater_uw_joined <- inner_join(larvalwater_uw_dist_df, larvalwater_sample_data, by = "SampleID") 
+
+adonis2(formula = larvalwater_uw_dist ~ Building + Building/Tray_Cage, data = larvalwater_uw_joined) 
+
+```
+
+```{r}
+pairwise.adonis2(larvalwater_uw_dist ~ Building + Building/Tray_Cage, data = larvalwater_uw_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+```{r}
+
+LW_uw_dists <- list()
+LW_uw_sample_data_frames <- list()
+LW_uw_dist_matrices <- list()
+LW_uw_joined_dfs <- list()
+LW_uw_disp_Tray_Cage <- list()
+LW_uw_perm_disp_Tray_Cage <- list()
+
+for (i in seq_along(buildings)) {
+  current_building <- buildings[i]
+  current_label <- labels[i]
+  
+  LW_uw_subset_data <- subset_samples(ps_larvalwater, Building == current_building)
+  
+  LW_uw_dist <- phyloseq::distance(LW_uw_subset_data, method="unifrac", weighted=FALSE)
+  
+  LW_uw_sample_data_df <- as.data.frame(sample_data(LW_uw_subset_data))
+  
+  LW_uw_dist_matrix <- as.matrix(LW_uw_dist)
+  LW_uw_dist_df <- cbind(rownames(LW_uw_dist_matrix), data.frame(LW_uw_dist_matrix, row.names=NULL))
+  colnames(LW_uw_dist_df)[1] <- "SampleID"
+  colnames(LW_uw_sample_data_df)[1] <- "SampleID"
+  
+  LW_uw_joined <- inner_join(LW_uw_dist_df, LW_uw_sample_data_df, by="SampleID")
+  
+  LW_uw_disp_Tray_Cage_result <- betadisper(LW_uw_dist, LW_uw_joined$Tray_Cage)
+  LW_uw_perm_disp_Tray_Cage_result <- permutest(LW_uw_disp_Tray_Cage_result, permutations=999)
+  
+  cat("Results for Building larval water UW:", current_building, "\n")
+  print(LW_uw_perm_disp_Tray_Cage_result)
+  
+  LW_uw_dists[[current_label]] <- LW_uw_dist
+  LW_uw_sample_data_frames[[current_label]] <- LW_uw_sample_data_df
+  LW_uw_dist_matrices[[current_label]] <- LW_uw_dist_matrix
+  LW_uw_joined_dfs[[current_label]] <- LW_uw_joined
+  LW_uw_disp_Tray_Cage[[current_label]] <- LW_uw_disp_Tray_Cage_result
+  LW_uw_perm_disp_Tray_Cage[[current_label]] <- LW_uw_perm_disp_Tray_Cage_result
+}
+
+# none signif
+```
+
+```{r}
+
+#############  tap water ############### 
+
+tapwater_uw_dist_matrx = as.matrix(water_uw_dist)
+tapwater_uw_dist_df <- cbind(rownames(tapwater_uw_dist_matrx), data.frame(tapwater_uw_dist_matrx, row.names =NULL))
+colnames(tapwater_uw_dist_df)[1] <- "SampleID"
+tapwater_uw_joined <- inner_join(tapwater_uw_dist_df, tapwater_sample_data, by = "SampleID") 
+
+adonis2(formula = water_uw_dist ~ Building, data = tapwater_uw_joined) # no tray effects tested for with tap water
+
+```
+
+```{r}
+pairwise.adonis2(water_uw_dist ~ Building, data = tapwater_uw_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+
+```
+
+
+```{r}
+
+#############  fish food  ############### 
+
+food_uw_dist_matrx = as.matrix(food_uw_dist)
+food_uw_dist_df <- cbind(rownames(food_uw_dist_matrx), data.frame(food_uw_dist_matrx, row.names =NULL))
+colnames(food_uw_dist_df)[1] <- "SampleID"
+food_uw_joined <- inner_join(food_uw_dist_df, food_sample_data, by = "SampleID") 
+
+adonis2(formula = food_uw_dist ~ Building, data = food_uw_joined) # no tray effects tested for with food
+
+```
+not statistically significant
+
+```{r}
+
+#############  sugar solution ############### 
+
+sugar_uw_dist_matrx = as.matrix(sugar_uw_dist)
+sugar_uw_dist_df <- cbind(rownames(sugar_uw_dist_matrx), data.frame(sugar_uw_dist_matrx, row.names =NULL))
+colnames(sugar_uw_dist_df)[1] <- "SampleID"
+sugar_uw_joined <- inner_join(sugar_uw_dist_df, sugar_sample_data, by = "SampleID") 
+
+adonis2(formula = sugar_uw_dist ~ Building, data = sugar_uw_joined) 
+
+```
+
+```{r}
+pairwise.adonis2(food_uw_dist ~ Building, data = food_uw_joined, p.adjust.method = "bonferroni", nperm = 999)
+
+```
+
+
