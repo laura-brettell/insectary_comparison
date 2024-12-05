@@ -1,0 +1,155 @@
+---
+title: "Ins_comp_5-ASVs"
+author: "laura"
+date: "2024-01-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# The project
+
+Does rearing in a different insectary affect the mosquito microbiome?
+
+# The setup
+
+one cohort of Ae aegypti eggs were split into 3 and reared in standard conditions to see how their microbiomes varied between insectaries at diff life stages.
+
+
+Now I will try a couple of ways to investigate whether there are signatures or particular ASVs associated with different insectaries and in which sample types these appear - is it larvae and larval water as suggested from diversity plot groupings or is it others, or do signature ASVs persist?
+
+# Install packages
+
+```{r}
+
+library(phyloseq)
+library(ggplot2)
+library(dplyr) 
+library(pheatmap)
+```
+
+# import data
+
+```{r}
+
+rm(list = ls()) 
+ps = readRDS("physeq_obj_3974") 
+head(sample_data(ps))
+
+```
+
+
+```{r}
+
+# transform counts to rel abund
+ps2 <- transform_sample_counts(ps, function(x) x/sum(x))
+
+#Remove taxa not seen more than 0.05 rel abund in at least 0.004% of the samples (this equals 1 sample as there are 244 in total). This protects against an OTU with small mean & trivially large C.V. (I can't work out how to say - in any one sample)
+
+ps3 = filter_taxa(ps2, function(x) sum(x >= 0.05) >= (0.004*length(x)), TRUE) # this has 34 ASVs
+
+
+
+```
+
+
+### converting the zeros to NAs for convenient plotting
+
+
+```{r}
+# take components out of phloseq obj
+
+tax <- phyloseq::tax_table(ps3)
+meta <- sample_data(ps3)
+asv <- otu_table(ps3)
+
+asvdf <- as.data.frame(asv)
+asvdf[asvdf == 0] <- NA 
+  
+
+asv2 <- as.matrix(asvdf) # convert to matrix
+asv2 = otu_table(asv2, taxa_are_rows = TRUE) # convert to necessary format  to make phyloseq object
+
+
+psNAs <- phyloseq(asv2, tax, meta)  
+
+```
+
+
+To remember what families the ASVs belong to...
+
+```{r}
+heatmap_test10a <- plot_heatmap(
+              psNAs, 
+              method = NULL,
+              taxa.label = "Family",
+             taxa.order = "Family",
+             sample.order = "Building",
+             sample.label = "Tray_Cage",
+             trans = NULL,
+            low = "#B1C9E8",
+            high = "#002F6C",
+             na.value = "white",
+             title = "relative abundance of all ASVs seen at >= 5% reads in >= 1 sample")
+
+heatmap_test10a
+
+
+```
+
+
+```{r}
+
+# to see with tray/cage IDs for plotting
+
+heatmap_test11a <- heatmap_test10a + facet_grid(~factor(Sample_Type2, levels=c("Water", "FishFood", "LarvalWater", "Larva", "Sugar", "AdultFemale")), scales = "free_x", space = "free_x") 
+
+heatmap_test11a 
+
+```
+
+to make a dataframe of the rel abundances of all ASVs making this table + their taxonomic info
+
+
+
+
+```{r}
+
+# Extract the relative abundance table (samples x ASVs)
+sample_abundance_table <- as.data.frame(otu_table(ps3))
+
+# Ensure rows are samples and columns are ASVs
+if (taxa_are_rows(ps3)) {
+  sample_abundance_table <- t(sample_abundance_table)
+}
+
+# Append sample metadata
+metadata <- as.data.frame(sample_data(ps3))
+sample_abundance_with_meta <- cbind(metadata, sample_abundance_table)
+
+# View the sample-wise relative abundance table
+head(sample_abundance_with_meta)
+
+
+# Extract the ASV taxonomy table
+taxonomy_table <- as.data.frame(tax_table(ps3))
+
+# Ensure rows are named by ASV IDs
+taxonomy_table <- cbind(ASV_ID = rownames(taxonomy_table), taxonomy_table)
+rownames(taxonomy_table) <- NULL  # Remove rownames for a cleaner table
+
+# View the ASV taxonomy table
+head(taxonomy_table)
+
+
+#write.csv(taxonomy_table, "taxonomy_table.csv")
+
+
+```
+
+
+
+
