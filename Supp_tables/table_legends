@@ -1,0 +1,22 @@
+# Supplementary table legends
+
+Supplementary Table 1: Temperature, humidity and light cycle settings for the three test insectaries and average daily recorded temperature and relative humidity data using the Tinytag data logger. 
+
+Supplementary Table 2:  Raw temperature and humidity data obtained from TinyTag data loggers.
+
+Supplementary Table 3: Development data for each insectary showing numbers of mosquitoes developing to pupal and adult stages and duration to pupation. 
+
+Supplementary Table 4: Sample metadata for all samples passing quality control and filtering, including the sample type, building (one experimental insectary per building was used), cage/tray as applicable, the number of reads after removal of contaminant ASVs and the accession number where the raw reads can be found on Sequence Read Archive. 
+
+Supplementary Table 5: Results of statistical analyses of alpha diversity data using a Kruskal-Wallis tests followed by Dunn’s test for pairwise interactions. Results are presented both for the overall comparison of sample types, followed by the comparison between insectaries for each sample type separately.
+
+Supplementary Table 6: Results of statistical analyses of beta diversity data, using adonis2 and pairwise.adonis2 to identify statistically significant effects of sample type, insectary and sample type:insectary interactions, using both Bray-Curtis and Unweighted Unifrac data.
+
+Supplementary Table 7: Results of dispersion analysis of beta diversity data (PERMDISP), comparing effects of sample type, insectary and sample type:insectary interactions, using both Bray-Curtis and Unweighted Unifrac data.
+
+Supplementary Table 8: Results of statistical analyses of beta diversity data, using adonis2 and pairwise.adonis2 to identify statistically significant effects of insectary and, in the case of adult females, larvae and larval water, the nested effect of cage/tray effects within each insectary, for the different sample types, using both Bray-Curtis and Unweighted Unifrac data.
+
+Supplementary Table 9: Results of dispersion analysis of beta diversity data (PERMDISP), comparing effect of insectary and, in the case of adult females, larvae and larval water, the effect of cage/tray effects within each insectary, for the different sample types, using both Bray-Curtis and Unweighted Unifrac data.
+
+Supplementary Table 10: Relative abundance of ASVs in each sample, underlying the heatmap shown in Figure 4b. The data comprises all ASVs present at ≥ 5% relative abundance in at least one sample.
+
