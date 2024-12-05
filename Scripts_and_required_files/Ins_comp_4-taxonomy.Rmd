@@ -1,0 +1,255 @@
+---
+title: "Ins_comp_b4-taxonomy"
+author: "laura"
+date: "2024-01-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The project
+
+Does rearing in a different insectary affect the mosquito microbiome?
+
+# The setup
+
+one cohort of Ae aegypti eggs were split into 3 and reared in standard conditions to see how their microbiomes varied between insectaries at diff life stages.
+
+
+This script looks at what bacterial taxa are present in different groups and sample types.
+
+This is from the following:
+https://rpubs.com/lgschaerer/1006964 
+https://stackoverflow.com/questions/72569157/r-calculate-most-abundant-taxa-using-phyloseq-object
+
+
+# Install packages
+
+```{r}
+
+library(phyloseq)
+library(ggplot2)
+library(tidyverse)
+library(dplyr) 
+
+```
+
+# starting with the phyloseq obj
+
+```{r}
+rm(list = ls()) # clear env
+
+ps = readRDS("physeq_obj_3974") 
+
+head(sample_data(ps))
+
+```
+
+Here I identify the top 20 genera across the whole dataset and plot those, regardless of how much is in any one sampletype and then group everything else as other.
+
+STEP 1: identify list of top 20 genera in dataset
+
+```{r, eval=FALSE, warning=FALSE}
+
+T <- ps %>% 
+    tax_glom(., "Genus") %>% 
+    transform_sample_counts(function(x)100* x / sum(x)) %>% psmelt() %>% 
+    arrange(OTU) %>% rename(OTUsID = OTU) %>% 
+    select(OTUsID, Genus, SampleID, Abundance) %>%
+    spread(SampleID, Abundance)
+
+T$Mean <- rowMeans(T[, c(3:ncol(T))])
+
+GEN <- T[, c("Genus", "Mean" ) ]
+
+#order data frame  
+GEN <- GEN[order(dplyr::desc(GEN$Mean)),]
+rownames(GEN) <- NULL
+
+head(GEN)
+
+# subset to top 20
+
+GEN20 <- top_n(GEN,20,Mean) 
+
+# make a vector for the genera of interest
+GEN20 <- GEN20$Genus
+
+
+```
+
+STEP 2: convert phloseq obj into a dataframe showing genus level abundance data (similar to above but containing slightly different info)
+
+```{r}
+genusabundance <- ps %>%
+  tax_glom(taxrank = "Genus") %>%                        # Set to smallest taxonomic level you are interested in
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%   # Transform to rel. abundance
+  psmelt()                                               # Melt to long format
+head(genusabundance)
+```
+
+STEP 3: Filter, group and modify data to prepare for plotting.
+
+select() function: Choose which variables to include in the plot. Select ALL variables that will be used for x-axis and/or facet labels in addition to all taxonomic levels you are interested in.
+
+filter() function: Filter out all taxa with zero percent abundance. Filter can also be used to remove treatments or conditions that are not to be included in the plot.
+
+mutate() function: Convert the taxonomic level columns to character vectors (they are factors by default), can also be used to add additional columns or modify existing columns as desired.
+
+
+```{r}
+all <- genusabundance %>%
+  select(Phylum, Class, Family, Genus, SampleID, Abundance, Sample_Type2, Building, for_ordering) %>%
+  filter(Abundance != 0) %>%
+  mutate(
+    Phylum = as.character(Phylum),
+    Class = as.character(Class),
+    Family = as.character(Family),
+    Genus = as.character(Genus))
+head(all)
+
+```
+
+
+STEP 4: modify the dataframe to replace all genus names that aren't the 20 of interest to '_Other' (added the underscore just as a simple way to put Other at the top of the plots)
+
+```{r}
+
+genus_new <- all
+genus_new <- genus_new %>%
+    mutate(Genus = case_when(Genus == 'Asaia' ~ 'Asaia',
+                           Genus == 'Elizabethkingia' ~ 'Elizabethkingia',
+                           Genus == 'Delftia' ~ 'Delftia',
+                           Genus == 'Massilia' ~ 'Massilia',
+                           Genus == 'Vibrio' ~ 'Vibrio',
+                           Genus == 'Burkholderia-Caballeronia-Paraburkholderia' ~ 'Burkholderia-Caballeronia-Paraburkholderia',
+                           Genus == 'Sphingobacterium' ~ 'Sphingobacterium',
+                           Genus == 'Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium' ~ 'Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium',
+                           Genus == 'Arthrospira_PCC-7345' ~ 'Arthrospira_PCC-7345',
+                           Genus == 'Solitalea' ~ 'Solitalea',
+                           Genus == 'Flavobacterium' ~ 'Flavobacterium',
+                           Genus == 'Peredibacter' ~ 'Peredibacter',
+                           Genus == 'Microbacterium' ~ 'Microbacterium',
+                           Genus == 'Bifidobacterium' ~ 'Bifidobacterium',
+                           Genus == 'Phreatobacter' ~ 'Phreatobacter',
+                           Genus == 'Stenotrophomonas' ~ 'Stenotrophomonas',
+                           Genus == 'Pedobacter' ~ 'Pedobacter',
+                           Genus == 'Acinetobacter' ~ 'Acinetobacter',
+                           Genus == 'Sphingomonas' ~ 'Sphingomonas',
+                           Genus == 'Pseudomonas' ~ 'Pseudomonas',
+                           TRUE ~ '_Other'))
+
+
+length(unique(genus_new$Genus)) # just check there's 20 + 'other'
+
+
+```
+
+STEP 5: prepare the data for plotting with building and sampletype groupings
+
+```{r}
+genus_new_group <- genus_new %>%
+  select(Sample_Type2, Building, Genus, Abundance, SampleID) %>%
+  group_by(Sample_Type2, Building) %>%
+  mutate(totalSum = sum(Abundance)) %>%
+  ungroup() %>%
+  group_by(Sample_Type2, Building, Genus, totalSum) %>%
+  summarise(
+    Abundance = sum(Abundance),
+    RelAb = Abundance/totalSum) %>%
+  unique()
+
+```
+
+
+
+STEP 6: set colours
+
+```{r}
+colours <- c(
+  "_Other" = "black",
+  "Acinetobacter" = "#638B27",
+  "Asaia" = "#378B53", 
+  "Burkholderia-Caballeronia-Paraburkholderia" = "#AC0123", 
+  "Stenotrophomonas" = "#7FC3CE", 
+  "Massilia" = "#97D0A7", 
+  "Phreatobacter" = "#56187D", 
+  "Sphingobacterium" = "#006347", 
+  "Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium" = "#00008B",
+  "Bifidobacterium" = "#CA5054",
+  "Pedobacter" = "#DFE2A9",
+  "Elizabethkingia" = "#FFC44B",
+  "Microbacterium" = "#EA8F97",
+  "Pseudomonas" = "#DA6610",
+  "Vibrio" = "#E49DB8",
+  "Arthrospira_PCC-7345" = "#9C58A1",
+  "Sphingomonas" = "#00A087FF",
+  "Delftia" =  "#485AB1",
+  "Flavobacterium" = "#FFE8A1",
+  "Peredibacter" =  "#3C5488FF",
+  "Solitalea" = "#EF9F26"
+)
+
+
+
+```
+
+STEP 7: plot
+
+```{r}
+plotA <- abund_plot <- ggplot(genus_new_group)+
+  geom_col(mapping = aes(x = Building, y = RelAb, fill = Genus), position = "stack", show.legend = TRUE)+
+  facet_grid(~factor(Sample_Type2, levels=c("Water", "FishFood", "LarvalWater", "Larva", "Sugar", "AdultFemale")), scales = "free", space = "free")+
+  ylab("Proportion of Community") +
+  xlab(NULL)+
+  scale_fill_manual(values = colours) +
+  theme(axis.text.y = element_text(size = 14, color = "black"),
+        axis.title.y = element_text(size = 14, color = "black"),
+        axis.text.x = element_text(size = 14, angle = 45, vjust = 1, hjust = 1, color = "black"),
+        legend.text = element_text(size = 14),
+        legend.position = "right",
+        legend.spacing.x = unit(0.1, 'mm'),
+        legend.spacing.y = unit(0.05, 'mm'),
+        plot.margin=grid::unit(c(0.3,0.3,0.3,0.3), "mm"),
+        strip.text = element_text(size = 16, face = "bold", angle = 0),
+        legend.title = element_text(face="bold", size = 14))+
+  guides(fill=guide_legend(ncol=1,byrow=TRUE))
+
+plotA
+
+```
+
+# now for as individual samples
+
+
+```{r}
+# add a column of insectary + sampleIDs so the order of the x axis is by insectary 
+genus_ordered <- genus_new 
+genus_ordered$ins_samp <- paste(genus_ordered$Building, genus_ordered$SampleID, sep = "-")
+
+plotB <- abund_plot <- ggplot(genus_ordered)+
+  geom_col(mapping = aes(x = ins_samp, y = Abundance, fill = Genus), position = "stack", show.legend = TRUE)+
+  ylab("Proportion of Community") +
+  xlab(NULL)+
+  scale_fill_manual(values = colours) +
+#  theme_linedraw()+
+  theme(axis.text.y = element_text(size = 11, color = "black"),
+        axis.title.y = element_text(size = 11, color = "black"),
+        axis.text.x = element_text(size = 5, angle = 45, vjust = 1, hjust = 1, color = "black"),
+        legend.text = element_text(size = 11),
+        legend.position = "right",
+        legend.spacing.x = unit(0.1, 'mm'),
+        legend.spacing.y = unit(0.05, 'mm'),
+        plot.margin=grid::unit(c(0.3,0.3,0.3,0.3), "mm"),
+        strip.text = element_text(size = 16, face = "bold", angle = 0),
+        legend.title = element_text(face="bold", size = 14))+
+        facet_grid(~factor(Sample_Type2, levels=c("Water", "FishFood", "LarvalWater", "Larva", "Sugar", "AdultFemale")), scales = "free", space = "free")+
+        guides(fill=guide_legend(ncol=1,byrow=TRUE))
+
+plotB 
+
+
+```
+
