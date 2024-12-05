@@ -1,0 +1,184 @@
+---
+title: "Ins_comp_7-survival"
+author: "laura"
+date: "2024-04-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The project
+
+Does rearing in a different insectary affect the mosquito microbiome?
+
+# The setup
+
+one cohort of Ae aegypti eggs were split into 3 and reared in standard conditions to see how their microbiomes varied between insectaries at diff life stages.
+
+
+# Install packages
+
+```{r}
+library(ggplot2)
+library(patchwork)
+library(tidyverse)
+```
+
+# import data
+
+```{r}
+dat = read.csv("ins_comp_survival_data.csv")
+
+
+sapply(dat, class)
+
+as.numeric(dat$number)
+
+
+```
+
+```{r}
+colours2 <- c(
+  "ACC" = "#00A087FF",
+  "CTID" = "#3C5488FF",
+  "MK" = "#9C58A1"
+)
+```
+
+# plot 
+
+```{r}
+
+p <- ggplot(data= dat, aes(x= tray, y= number, colour = insectary, shape = stage)) +
+  geom_point(size = 3) + 
+   scale_color_manual(values = colours2) +
+  scale_y_continuous(limits = c(90, 150)) +
+  facet_grid(~factor(insectary, levels=c("CTID", "MK", "ACC")), scales = "free", space = "free")
+p
+
+
+```
+
+# stats
+
+using the same data presented in a slightly different way
+
+
+```{r}
+
+# import data
+dat2 = read.csv("ins_comp_survival2.csv")
+
+# sapply(dat2, class)
+
+```
+
+```{r}
+
+# ANOVA
+anova_pupae <- aov(stage2 ~ insectary, data = dat2)
+anova_adult <- aov(stage3 ~ insectary, data = dat2)
+
+summary(anova_pupae)
+summary(anova_adult)
+
+
+# Kruskal-WAllis
+Kruskal_pupae <- kruskal.test(stage2 ~ insectary, data = dat2)
+Kruskal_adult <- kruskal.test(stage3 ~ insectary, data = dat2)
+
+
+if (Kruskal_pupae$p.value < 0.05) {
+  print("There are significant differences between at least two groups.")
+} else {
+  print("There is not enough evidence to conclude significant differences between groups.")
+}
+
+if (Kruskal_adult$p.value < 0.05) {
+  print("There are significant differences between at least two groups.")
+} else {
+  print("There is not enough evidence to conclude significant differences between groups.")
+}
+
+
+```
+
+No statistically significant difference in numbers making it to pupal and adult stages in the different rooms, but only 3 reps per room so it would need to be a big difference to see that.
+
+
+# pupal development time
+
+
+```{r}
+pup = read.csv("pupae_development.csv")
+
+```
+
+# plot 
+
+```{r}
+
+p2 <- ggplot(data= pup, aes(x= time.to.pupation, y= number, colour = insectary, shape = tray)) +
+  geom_point(size = 3) + 
+   scale_color_manual(values = colours2) +
+  scale_y_continuous(limits = c(0, 150)) +
+  facet_grid(~factor(insectary, levels=c("CTID", "MK", "ACC")), scales = "free", space = "free")+
+  geom_line()
+p2
+
+
+#Renaming insectaries to make my life easier
+
+pup <- pup %>% 
+  mutate(insectary = gsub("CTID", "A", insectary), 
+         insectary = gsub("MK", "B", insectary),
+         insectary = gsub("ACC", "C", insectary)
+  )
+
+dat <- dat %>% 
+  mutate(insectary = gsub("CTID", "A", insectary), 
+         insectary = gsub("MK", "B", insectary),
+         insectary = gsub("ACC", "C", insectary)
+  )
+
+
+dat <- dat %>% 
+  mutate(tray = gsub("A", "t1", tray), 
+         tray = gsub("B", "t2", tray),
+         tray = gsub("C", "t3", tray)
+  )
+
+
+
+colours3 <- c(
+  "C" = "#00A087FF",
+  "A" = "#3C5488FF",
+  "B" = "#9C58A1"
+)
+
+
+p3 <- ggplot(data = pup, mapping = aes(time.to.pupation, number, fill=insectary)) + 
+  geom_boxplot(alpha=0.8) +
+  scale_fill_manual(values = colours3) +
+  theme_minimal() +
+  geom_point(position=position_dodge(width=0.75),aes(group=insectary)) + 
+  labs(title="Pupation time",x="Day of experiment", y = "Count (mosquitoes pupated)")
+
+
+p <- ggplot(data= dat, aes(x= tray, y= number, colour = insectary, shape = stage)) +
+  geom_point(size = 2) + 
+  scale_color_manual(values = colours3) +
+  scale_y_continuous(limits = c(90, 150)) +
+  facet_grid(~factor(insectary, levels=c("A", "B", "C")), scales = "free", space = "free") +
+  theme_bw() + 
+  labs(title="Developmental stages",x="Tray", y = "Count (mosquitoes)")
+
+p3 / p + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') +  plot_annotation(title = 'Mosquito development times')
+
+pdf("Mosquito_development.pdf", width=4, height=7)
+p3 / p + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') +  plot_annotation(title = 'Mosquito development times')
+dev.off()
+```
+
